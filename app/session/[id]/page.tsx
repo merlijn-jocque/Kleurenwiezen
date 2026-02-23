@@ -1,7 +1,7 @@
 // app/session/[id]/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useParams, useRouter } from "next/navigation";
 
@@ -55,7 +55,7 @@ function computePoints(
 
   const { min, max } = winnerRange(choice);
   if (winnerIds.length < min || winnerIds.length > max) {
-    throw new Error(`Kies ${min === max ? min : `${min} t.e.m. ${max}`} winnaar(s).`);
+    throw new Error(`Selecteer ${min === max ? min : `${min} t.e.m. ${max}`} winnaar(s).`);
   }
 
   const isWinner = (pid: string) => winnerIds.includes(pid);
@@ -67,7 +67,7 @@ function computePoints(
 
   const out: Record<string, number> = {};
 
-  // Misère: verdelen
+  // Misère (verdeling)
   if (choice === "KLEINE_MISERE" || choice === "GROTE_MISERE") {
     const total = choice === "KLEINE_MISERE" ? 12 : 24;
 
@@ -75,11 +75,12 @@ function computePoints(
     const losePts = -total / losers;
 
     if (!Number.isInteger(winPts) || !Number.isInteger(losePts)) {
-      throw new Error("Misère verdeling niet geldig.");
+      throw new Error("Misère verdeling niet geldig (kies andere winnaars).");
     }
 
     for (const p of players) out[p.id] = isWinner(p.id) ? winPts : losePts;
   } else {
+    // Klassiek
     let baseWin = 0;
     let baseLose = 0;
     let winExtra = 0;
@@ -118,16 +119,13 @@ function computePoints(
         break;
     }
 
-    for (const p of players) {
-      out[p.id] = isWinner(p.id) ? baseWin + winExtra : baseLose + loseExtra;
-    }
+    for (const p of players) out[p.id] = isWinner(p.id) ? baseWin + winExtra : baseLose + loseExtra;
   }
 
   for (const k of Object.keys(out)) out[k] *= multiplier;
 
   const sum = Object.values(out).reduce((a, b) => a + b, 0);
   if (sum !== 0) throw new Error(`Som = ${sum}, niet 0.`);
-
   return out;
 }
 
@@ -158,12 +156,6 @@ export default function SessionPage() {
 
   const [preview, setPreview] = useState<Record<string, number>>({});
   const [inputError, setInputError] = useState<string | null>(null);
-
-  // ✅ spacing between last player and "Keuze" divider
-  const GAP_AFTER_LAST_PLAYER = 48;
-
-  // ✅ fixed width for each score column so header and values align perfectly
-  const SCORE_COL_WIDTH = 92;
 
   async function getGroupId() {
     const code = localStorage.getItem("kw_join_code");
@@ -319,16 +311,16 @@ export default function SessionPage() {
 
   const totalColor = (n: number) => (n > 0 ? "green" : n < 0 ? "crimson" : "inherit");
 
-  // stable mapping of player -> index for table alignment
-  const playerNames = useMemo(() => players.map((p) => p.name), [players]);
+  // ---- Layout constants (mobiel vriendelijk) ----
+  const SCORE_COL_WIDTH = 96;
+  const GAP_AFTER_LAST_PLAYER = 80; // ✅ extra ruimte voor de verticale lijn vóór Keuze
+  const CHOICE_COL_WIDTH = 190;
 
   return (
     <div style={{ padding: 24, maxWidth: 900, fontFamily: "system-ui" }}>
       <button onClick={() => router.push("/")}>← Terug</button>
 
-      <h1 style={{ fontWeight: 800, fontSize: 28, marginBottom: 6 }}>
-        {session?.title ?? "Avond"}
-      </h1>
+      <h1 style={{ fontWeight: 800, fontSize: 28, marginBottom: 6 }}>{session?.title ?? "Avond"}</h1>
 
       {/* Nieuwe ronde badge */}
       <div
@@ -377,22 +369,64 @@ export default function SessionPage() {
           </select>
         </div>
 
-        {/* Overslagen */}
+        {/* Overslagen (✅ met +/- knoppen, werkt op smartphone) */}
         {(choice === "ENKEL" || choice === "DUBBEL" || choice === "TROEL") && (
           <div>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Overslagen</div>
-            <input
-              type="number"
-              min={0}
-              value={overslagen}
-              onChange={(e) => setOverslagen(parseInt(e.target.value || "0", 10))}
-              style={{
-                width: "100%",
-                padding: 8,
-                borderRadius: 10,
-                border: "1px solid #ccc",
-              }}
-            />
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setOverslagen((o) => Math.max(0, o - 1))}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  background: "#fafafa",
+                  fontSize: 20,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+                aria-label="Overslagen min 1"
+              >
+                −
+              </button>
+
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={overslagen}
+                onChange={(e) => setOverslagen(Math.max(0, parseInt(e.target.value || "0", 10)))}
+                style={{
+                  width: 90,
+                  textAlign: "center",
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 16,
+                }}
+              />
+
+              <button
+                type="button"
+                onClick={() => setOverslagen((o) => o + 1)}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  background: "#fafafa",
+                  fontSize: 20,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+                aria-label="Overslagen plus 1"
+              >
+                +
+              </button>
+            </div>
           </div>
         )}
 
@@ -400,20 +434,16 @@ export default function SessionPage() {
         <div style={{ display: "grid", gap: 6 }}>
           <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input type="checkbox" checked={pass} onChange={(e) => setPass(e.target.checked)} />
-            <span>Rondje pass (x2)</span>
+            <span>Rondje pass</span>
           </label>
 
           <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input type="checkbox" checked={pass2} onChange={(e) => setPass2(e.target.checked)} />
-            <span>Rondje pass (x4)</span>
+            <span>Rondje pass (x2)</span>
           </label>
 
           <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={fullRound}
-              onChange={(e) => setFullRound(e.target.checked)}
-            />
+            <input type="checkbox" checked={fullRound} onChange={(e) => setFullRound(e.target.checked)} />
             <span>Volledige ronde</span>
           </label>
         </div>
@@ -455,6 +485,7 @@ export default function SessionPage() {
               </label>
             );
           })}
+          {/* bewust geen rode foutmelding meer */}
         </div>
 
         {/* Opslaan */}
@@ -464,9 +495,9 @@ export default function SessionPage() {
           style={{
             padding: "12px 14px",
             borderRadius: 12,
-            border: "1px solid #111",
-            background: inputError ? "#eee" : "#111",
-            color: inputError ? "#777" : "white",
+            border: "1px solid #ccc",
+            background: inputError ? "#eee" : "#fafafa",
+            color: inputError ? "#777" : "#111",
             fontWeight: 800,
             cursor: inputError ? "not-allowed" : "pointer",
           }}
@@ -481,56 +512,64 @@ export default function SessionPage() {
       {rounds.length === 0 ? (
         <p>Nog geen rondes.</p>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          {/* ✅ Use table-layout: fixed + fixed widths so values are centered under headers */}
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, tableLayout: "fixed" }}>
+        // ✅ Optie B: wrapper met horizontale scroll + touch scrolling
+        <div
+          style={{
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
+            border: "1px solid #eee",
+            borderRadius: 12,
+            marginTop: 8,
+          }}
+        >
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              minWidth: 520, // ✅ leesbaar op gsm, swipe indien nodig
+              tableLayout: "fixed",
+            }}
+          >
             <colgroup>
-              <col style={{ width: 70 }} />
-              {playerNames.map((n, idx) => {
-                const isLast = idx === playerNames.length - 1;
-                return (
-                  <col
-                    key={n}
-                    style={{
-                      width: SCORE_COL_WIDTH + (isLast ? GAP_AFTER_LAST_PLAYER : 0),
-                    }}
-                  />
-                );
-              })}
-              <col style={{ width: 240 }} />
+              <col style={{ width: 80 }} />
+              {players.map((p, i) => (
+                <col
+                  key={p.id}
+                  style={{
+                    width: SCORE_COL_WIDTH + (i === players.length - 1 ? GAP_AFTER_LAST_PLAYER : 0),
+                  }}
+                />
+              ))}
+              <col style={{ width: CHOICE_COL_WIDTH }} />
             </colgroup>
 
             <thead>
               <tr>
-                <th style={{ textAlign: "center", padding: 8, borderBottom: "1px solid #ddd" }}>
-                  Ronde
-                </th>
+                <th style={{ textAlign: "center", padding: 10, borderBottom: "1px solid #ddd" }}>Ronde</th>
 
-                {players.map((p, idx) => {
-                  const isLast = idx === players.length - 1;
-                  return (
-                    <th
-                      key={p.id}
-                      style={{
-                        textAlign: "center", // ✅ header centered
-                        padding: 8,
-                        borderBottom: "1px solid #ddd",
-                        whiteSpace: "nowrap",
-                        borderRight: isLast ? "2px solid #ddd" : undefined,
-                        paddingRight: isLast ? GAP_AFTER_LAST_PLAYER : 8,
-                      }}
-                    >
-                      {p.name}
-                    </th>
-                  );
-                })}
+                {players.map((p, i) => (
+                  <th
+                    key={p.id}
+                    style={{
+                      textAlign: "center",
+                      padding: 10,
+                      borderBottom: "1px solid #ddd",
+                      whiteSpace: "nowrap",
+                      borderRight: i === players.length - 1 ? "2px solid #ddd" : undefined,
+                      paddingRight: i === players.length - 1 ? GAP_AFTER_LAST_PLAYER : 10,
+                    }}
+                  >
+                    {p.name}
+                  </th>
+                ))}
 
                 <th
                   style={{
                     textAlign: "left",
-                    padding: 8,
+                    padding: 10,
                     paddingLeft: 18,
                     borderBottom: "1px solid #ddd",
+                    borderLeft: "2px solid #ddd",
                     whiteSpace: "nowrap",
                   }}
                 >
@@ -542,25 +581,23 @@ export default function SessionPage() {
             <tbody>
               {rounds.map((r) => (
                 <tr key={r.no}>
-                  <td style={{ textAlign: "center", padding: 8, borderBottom: "1px solid #f0f0f0" }}>
-                    {r.no}
-                  </td>
+                  <td style={{ textAlign: "center", padding: 10, borderBottom: "1px solid #f0f0f0" }}>{r.no}</td>
 
-                  {players.map((p, idx) => {
-                    const isLast = idx === players.length - 1;
-                    const it = r.items.find((i) => i.name === p.name);
+                  {players.map((p, i) => {
+                    const it = r.items.find((x) => x.name === p.name);
                     const val = it?.points ?? 0;
 
                     return (
                       <td
                         key={p.id}
                         style={{
-                          textAlign: "center", // ✅ values centered under header
-                          padding: 8,
+                          textAlign: "center", // ✅ mooi gecentreerd onder naam
+                          padding: 10,
                           borderBottom: "1px solid #f0f0f0",
                           whiteSpace: "nowrap",
-                          borderRight: isLast ? "2px solid #eee" : undefined,
-                          paddingRight: isLast ? GAP_AFTER_LAST_PLAYER : 8,
+                          borderRight: i === players.length - 1 ? "2px solid #eee" : undefined,
+                          paddingRight: i === players.length - 1 ? GAP_AFTER_LAST_PLAYER : 10,
+                          fontWeight: "normal",
                         }}
                       >
                         {val}
@@ -571,9 +608,10 @@ export default function SessionPage() {
                   <td
                     style={{
                       textAlign: "left",
-                      padding: 8,
+                      padding: 10,
                       paddingLeft: 18,
                       borderBottom: "1px solid #f0f0f0",
+                      borderLeft: "2px solid #eee",
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -584,33 +622,24 @@ export default function SessionPage() {
 
               {/* TOTAALRIJ */}
               <tr>
-                <td
-                  style={{
-                    textAlign: "center",
-                    padding: 8,
-                    fontWeight: 800,
-                    borderTop: "2px solid #ddd",
-                  }}
-                >
+                <td style={{ textAlign: "center", padding: 10, fontWeight: 900, borderTop: "2px solid #ddd" }}>
                   Totaal
                 </td>
 
-                {players.map((p, idx) => {
-                  const isLast = idx === players.length - 1;
+                {players.map((p, i) => {
                   const total = totalForName(p.name);
-
                   return (
                     <td
                       key={p.id}
                       style={{
-                        textAlign: "center", // ✅ totals centered too
-                        padding: 8,
-                        fontWeight: 800,
+                        textAlign: "center",
+                        padding: 10,
+                        fontWeight: 900,
                         borderTop: "2px solid #ddd",
                         whiteSpace: "nowrap",
                         color: totalColor(total),
-                        borderRight: isLast ? "2px solid #ddd" : undefined,
-                        paddingRight: isLast ? GAP_AFTER_LAST_PLAYER : 8,
+                        borderRight: i === players.length - 1 ? "2px solid #ddd" : undefined,
+                        paddingRight: i === players.length - 1 ? GAP_AFTER_LAST_PLAYER : 10,
                       }}
                     >
                       {total}
@@ -618,7 +647,7 @@ export default function SessionPage() {
                   );
                 })}
 
-                <td style={{ padding: 8, borderTop: "2px solid #ddd" }} />
+                <td style={{ padding: 10, borderTop: "2px solid #ddd" }} />
               </tr>
             </tbody>
           </table>

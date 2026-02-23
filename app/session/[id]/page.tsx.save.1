@@ -1,0 +1,133 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+
+type Player = { id: string; name: string };
+type ScoreMap = Record<string, number>;
+
+export default function SessionPage() {
+  const router = useRouter();
+  const { id: sessionId } = useParams<{ id: string }>();
+
+  const [title, setTitle] = useState<string>("Avond");
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [scores, setScores] = useState<ScoreMap>({});
+  const [roundNo, setRoundNo] = useState(1);
+  const [status, setStatus] = useState("Laden...");
+
+  useEffect(() => {
+    (async () => {
+      const joinCode = localStorage.getItem("kw_join_code")?.trim();
+      if (!joinCode) return router.push("/join");
+
+      const { data: group, error: gErr } = await supabase
+        .from("groups")
+        .select("id")
+        .eq("join_code", joinCode)
+        .single();
+
+      if (gErr || !group?.id) {
+        setStatus("Groep-code ongeldig. Ga naar /join.");
+        return;
+      }
+
+      const { data: s, error: sErr } = await supabase
+        .from("sessions")
+        .select("id,title,group_id")
+        .eq("id", sessionId)
+        .single();
+
+      if (sErr || !s || s.group_id !== group.id) {
+        setStatus("Sessie niet gevonden.");
+        return;
+      }
+
+      setTitle(s.title ?? "Avond");
+
+      const { data: pl, error: plErr } = await supabase
+        .from("players")
+        .select("id,name")
+        .eq("group_id", group.id)
+        .order("name");
+
+      if (plErr) {
+        setStatus("Fout players: " + plErr.message);
+        return;
+      }
+
+      setPlayers(pl ?? []);
+
+      const init: ScoreMap = {};
+      (pl ?? []).forEach((p) => (init[p.id] = 0));
+      setScores(init);
+
+      setStatus("Klaar ✅");
+    })();
+  }, [router, sessionId]);
+
+  async function saveRound() {
+    setStatus(`Ronde ${roundNo} opslaan...`);
+
+    const { data: r, error: rErr } = await supabase
+      .from("rounds")
+      .insert({ session_id: sessionId, round_no: roundNo })
+      .select("id")
+      .single();
+
+    if (rErr || !r?.id) {
+      setStatus("Fout ronde: " + (rErr?.message ?? "unknown"));
+      return;
+    }
+
+    const payload = players.map((p) => ({
+      round_id: r.id,
+      player_id: p.id,
+      points: scores[p.id] ?? 0,
+    }));
+
+    const { error: sErr } = await supabase.from("scores").insert(payload);
+    if (sErr) {
+      setStatus("Fout scores: " + sErr.message);
+      return;
+    }
+
+    setRoundNo((n) => n + 1);
+    setStatus("Opgeslagen ✅");
+  }
+
+  return (
+    <div style={{ padding: 24, fontFamily: "system-ui", maxWidth: 800 }}>
+      <button onClick={() => router.push("/")} style={{ marginBottom: 12 }}>
+        ← Terug
+      </button>
+
+      <h1>{title}</h1>
+      <p>{status}</p>
+
+      <h2>Ronde {roundNo}</h2>
+
+      {players.map((p) => (
+        <div key={p.id} style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+          <div style={{ width: 120 }}>{p.name}</div>
+          <input
+            type="number"
+            value={scores[p.id] ?? 0}
+            onChange={(e) =>
+              setScores((prev) => ({
+                ...prev,
+                [p.id]: parseInt(e.target.value || "0", 10),
+              }))
+            }
+            style={{ padding: 6, width: 120 }}
+          />
+        </div>
+      ))}
+
+      <button onClick={saveRound} style={{ marginTop: 12 }}>
+        Ronde opslaan
+      </button>
+    </div>
+  );
+}

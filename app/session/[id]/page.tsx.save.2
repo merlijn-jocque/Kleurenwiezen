@@ -1,0 +1,204 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { useParams, useRouter } from "next/navigation";
+
+type Player = { id: string; name: string };
+type Session = { id: string; title: string; group_id: string };
+type ScoreMap = Record<string, number>;
+
+export default function SessionPage() {
+  const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const sessionId = params.id;
+
+  const [session, setSession] = useState<Session | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [roundNo, setRoundNo] = useState(1);
+  const [scores, setScores] = useState<ScoreMap>({});
+  const [status, setStatus] = useState("Laden...");
+  const [rounds, setRounds] = useState<{ no: number; items: { name: string; points: number }[] }[]>([]);
+
+  async function getGroupId() {
+    const code = localStorage.getItem("kw_join_code");
+    if (!code) {
+      router.push("/join");
+      return null;
+    }
+    const { data } = await supabase.from("groups").select("id").eq("join_code", code).single();
+    return data?.id ?? null;
+  }
+
+  useEffect(() => {
+    (async () => {
+      const gid = await getGroupId();
+      if (!gid) return;
+
+      const { data: s } = await supabase
+        .from("sessions")
+        .select("id,title,group_id")
+        .eq("id", sessionId)
+        .single();
+
+      if (!s || s.group_id !== gid) {
+        setStatus("Sessie niet gevonden");
+        return;
+      }
+
+      setSession(s);
+
+      const { data: pl } = await supabase
+        .from("players")
+        .select("id,name")
+        .eq("group_id", gid)
+        .order("name");
+
+      setPlayers(pl ?? []);
+
+      const init: ScoreMap = {};
+      (pl ?? []).forEach((p) => (init[p.id] = 0));
+      setScores(init);
+
+      await loadRounds(pl ?? []);
+      setStatus("Klaar ✅");
+    })();
+  }, [sessionId]);
+
+  async function loadRounds(pl: Player[]) {
+    const { data: rs } = await supabase
+      .from("rounds")
+      .select("id,round_no")
+      .eq("session_id", sessionId)
+      .order("round_no");
+
+    if (!rs || rs.length === 0) {
+      setRounds([]);
+      setRoundNo(1);
+      return;
+    }
+
+    setRoundNo(rs[rs.length - 1].round_no + 1);
+
+    const ids = rs.map((r) => r.id);
+
+    const { data: sc } = await supabase
+      .from("scores")
+      .select("round_id,player_id,points")
+      .in("round_id", ids);
+
+    const byRound: any = {};
+    (sc ?? []).forEach((x: any) => {
+      byRound[x.round_id] ??= {};
+      byRound[x.round_id][x.player_id] = x.points;
+    });
+
+    const out = rs.map((r) => ({
+      no: r.round_no,
+      items: pl.map((p) => ({
+        name: p.name,
+        points: byRound[r.id]?.[p.id] ?? 0,
+      })),
+    }));
+
+    setRounds(out);
+  }
+
+  function setScore(pid: string, v: string) {
+    const n = parseInt(v, 10);
+    setScores((p) => ({ ...p, [pid]: Number.isFinite(n) ? n : 0 }));
+  }
+
+  async function saveRound() {
+    if (!session) return;
+
+    setStatus(`Ronde ${roundNo} opslaan...`);
+
+    const { data: r } = await supabase
+      .from("rounds")
+      .insert({ session_id: sessionId, round_no: roundNo })
+      .select("id")
+      .single();
+
+    if (!r) {
+      setStatus("Fout bij ronde");
+      return;
+    }
+
+    const rows = players.map((p) => ({
+      round_id: r.id,
+      player_id: p.id,
+      points: scores[p.id] ?? 0,
+    }));
+
+    const { error } = await supabase.from("scores").insert(rows);
+    if (error) {
+      setStatus("Fout scores: " + error.message);
+      return;
+    }
+
+    const reset: ScoreMap = {};
+    players.forEach((p) => (reset[p.id] = 0));
+    setScores(reset);
+
+    await loadRounds(players);
+    setStatus("Opgeslagen ✅");
+  }
+
+  return (
+    <div style={{ padding: 24, maxWidth: 800, fontFamily: "system-ui" }}>
+      <button onClick={() => router.push("/")}>← Terug</button>
+
+      <h1>{session?.title ?? "Avond"}</h1>
+      <p>{status}</p>
+
+      <h2>Nieuwe ronde #{roundNo}</h2>
+
+      {players.map((p) => (
+        <div key={p.id} style={{ display: "flex", gap: 10, marginBottom: 6 }}>
+          <div style={{ width: 120 }}>{p.name}</div>
+          <input type="number" value={scores[p.id] ?? 0} onChange={(e) => setScore(p.id, e.target.value)} />
+        </div>
+      ))}
+
+      <button onClick={saveRound}>Ronde opslaan</button>
+      <h2 style={{ marginTop: 24 }}>Totaal (avond)</h2>
+      {(() => {
+        const totals: Record<string, number> = {};
+        players.forEach((p) => (totals[p.name] = 0));
+        rounds.forEach((r) => {
+          r.items.forEach((i) => {
+            totals[i.name] = (totals[i.name] ?? 0) + i.points;
+          });
+        });
+        return (
+          <ul>
+            {Object.entries(totals).map(([name, total]) => (
+              <li key={name}>
+                {name}: <strong>{total}</strong>
+              </li>
+            ))}
+          </ul>
+        );
+      })()}
+
+      <h2 style={{ marginTop: 24 }}>Rondes</h2>
+      {rounds.length === 0 ? (
+        <p>Nog geen rondes.</p>
+      ) : (
+        rounds.map((r) => (
+          <div key={r.no}>
+            <strong>Ronde {r.no}</strong>
+            <ul>
+              {r.items.map((i) => (
+                <li key={i.name}>
+                  {i.name}: {i.points}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}

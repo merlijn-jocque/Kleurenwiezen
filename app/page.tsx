@@ -1,3 +1,4 @@
+// app/page.tsx  (of app/home/page.tsx)
 "use client";
 
 import { useEffect, useState } from "react";
@@ -8,9 +9,15 @@ type Session = { id: string; date: string; title?: string | null };
 
 export default function Home() {
   const router = useRouter();
+
   const [groupId, setGroupId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [status, setStatus] = useState<string>(""); // enkel fouten tonen
+  const [status, setStatus] = useState<string>("");
+
+  // ✅ NEW: gekozen datum
+  const [newDate, setNewDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
 
   useEffect(() => {
     (async () => {
@@ -46,15 +53,20 @@ export default function Home() {
     })();
   }, [router]);
 
-  async function newSession() {
-    if (!groupId) return;
+  /* ================== ACTIES ================== */
 
-    const today = new Date().toISOString().slice(0, 10);
-    const title = `Avond ${today}`;
+  async function newSession() {
+    if (!groupId || !newDate) return;
+
+    const title = `Avond ${newDate}`;
 
     const { data, error } = await supabase
       .from("sessions")
-      .insert({ group_id: groupId, date: today, title })
+      .insert({
+        group_id: groupId,
+        date: newDate,
+        title,
+      })
       .select("id")
       .single();
 
@@ -73,21 +85,6 @@ export default function Home() {
 
   async function exportCSV() {
     try {
-      if (!groupId) {
-        alert("Geen groupId gevonden.");
-        return;
-      }
-
-      const { data: sess } = await supabase
-        .from("sessions")
-        .select("id")
-        .eq("group_id", groupId);
-
-      if (!sess || sess.length === 0) {
-        alert("Geen data om te exporteren.");
-        return;
-      }
-
       const blob = new Blob(["Export via dashboard"], {
         type: "text/plain;charset=utf-8;",
       });
@@ -98,88 +95,119 @@ export default function Home() {
       a.download = "kleurenwiezen-export.txt";
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
+    } catch {
       alert("Export mislukt.");
     }
   }
 
+  /* ================== STYLES ================== */
+
+  // Centrale knopstijl
+  const btnStyle: React.CSSProperties = {
+    padding: "8px 12px",
+    borderRadius: 10,
+    border: "1px solid #ccc",
+    background: "white",
+    fontWeight: 600,
+    width: 220,
+    textAlign: "center",
+    color: "#111",
+    cursor: "pointer",
+  };
+
+  const grayBtn: React.CSSProperties = {
+    ...btnStyle,
+    background: "#f2f2f2",
+  };
+
+  /* ================== UI ================== */
+
   return (
     <div style={{ padding: 24, fontFamily: "system-ui", maxWidth: 900 }}>
+
       {/* Titel */}
       <h1 style={{ fontWeight: 800, fontSize: 28, marginBottom: 10 }}>
         Dashboard kleurenwiezen
       </h1>
 
-      {/* Foutmelding */}
-      {status ? <p style={{ color: "crimson" }}>{status}</p> : null}
+      {/* Fout */}
+      {status && <p style={{ color: "crimson" }}>{status}</p>}
 
       {/* Bovenste knoppen */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-        <button
-          onClick={changeCode}
-          style={{
-            padding: "6px 10px",
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background: "white",
-            fontWeight: 600,
-          }}
-        >
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+          marginBottom: 12,
+        }}
+      >
+        <button onClick={changeCode} style={btnStyle}>
           Code wijzigen
         </button>
 
-        <button
-          onClick={exportCSV}
-          style={{
-            padding: "6px 10px",
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background: "white",
-            fontWeight: 600,
-          }}
-          disabled={!groupId}
-        >
+        <button onClick={exportCSV} style={btnStyle} disabled={!groupId}>
           Export CSV
         </button>
       </div>
 
-      {/* Actieknoppen onder elkaar */}
+      {/* Actieknoppen */}
       <div
         style={{
           display: "flex",
           flexDirection: "column",
           gap: 8,
           marginTop: 6,
-          marginBottom: 10,
+          marginBottom: 12,
+          maxWidth: 220,
         }}
       >
+        {/* ✅ Datum selector (gecentreerd + grijs) */}
+        <div
+          style={{
+            ...grayBtn,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 0,
+          }}
+        >
+          <input
+            type="date"
+            value={newDate}
+            onChange={(e) => setNewDate(e.target.value)}
+            style={{
+              border: "none",
+              background: "transparent",
+              width: "100%",
+              height: "100%",
+              padding: "8px 12px",
+              fontWeight: 600,
+              outline: "none",
+              cursor: "pointer",
+              display: "flex",
+              justifyContent: "center",
+              textAlignLast: "center",
+              appearance: "none",
+              WebkitAppearance: "none",
+              MozAppearance: "none",
+            }}
+          />
+        </div>
+
+        {/* ✅ Nieuwe avond (grijs) */}
         <button
           onClick={newSession}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background: "white",
-            color: "#111",
-            fontWeight: 600,
-            width: "fit-content",
-          }}
+          style={grayBtn}
           disabled={!groupId}
         >
           Nieuwe avond
         </button>
 
+        {/* Statistieken */}
         <button
           onClick={() => router.push("/overzicht")}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background: "white",
-            fontWeight: 600,
-            width: "fit-content",
-          }}
+          style={btnStyle}
           disabled={!groupId}
         >
           Statistieken

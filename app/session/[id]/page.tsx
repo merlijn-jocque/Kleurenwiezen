@@ -19,7 +19,8 @@ type Choice =
   | "GROTE_MISERE"
   | "SOLO_SLIM";
 
-type Note = { id: string; body: string; created_at: string };
+// ✅ single note (1 per session)
+type Note = { id: string; body: string };
 
 /* ================= HELPERS ================= */
 
@@ -45,7 +46,6 @@ function labelChoice(c: string) {
 }
 
 /* ================= SCORE ENGINE ================= */
-
 /**
  * Negatieve overslagen:
  *  - Dubbel: o=0 => +2 ; o=+1 => +3 ; o=-1 => -3 ; o=-2 => -4 ; o=-3 => -5 ...
@@ -142,18 +142,151 @@ function computePoints(
   return out;
 }
 
-/* ================= SMALL SVG CHART HELPERS ================= */
+/* ================= CHART (same layout as overzicht) ================= */
 
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
-function buildLinePath(xs: number[], ys: number[]) {
-  if (xs.length === 0) return "";
-  let d = `M ${xs[0]} ${ys[0]}`;
-  for (let i = 1; i < xs.length; i++) d += ` L ${xs[i]} ${ys[i]}`;
-  return d;
-}
+/** SVG line chart (geen libs) + 0-lijn (stippel) + hoger */
+function LineChart({
+  series,
+  labels,
+}: {
+  series: { name: string; values: number[] }[];
+  labels: string[];
+}) {
+  const width = 980;
+  const height = 520;
+  const pad = { l: 56, r: 20, t: 18, b: 56 };
 
+  const all = series.flatMap((s) => s.values);
+  const has = all.length > 0;
+
+  const min = has ? Math.min(...all) : 0;
+  const max = has ? Math.max(...all) : 0;
+
+  const range = max - min || 1;
+  const yMin = min - Math.ceil(range * 0.08);
+  const yMax = max + Math.ceil(range * 0.08);
+
+  const n = labels.length;
+  const xStep = n > 1 ? (width - pad.l - pad.r) / (n - 1) : 1;
+
+  const x = (i: number) => pad.l + i * xStep;
+  const y = (v: number) => {
+    const t = (v - yMin) / (yMax - yMin || 1);
+    return pad.t + (1 - t) * (height - pad.t - pad.b);
+  };
+
+  const ticks = 6;
+  const yTicks = Array.from({ length: ticks }, (_, i) => yMin + (i * (yMax - yMin)) / (ticks - 1));
+
+  const zeroInRange = 0 >= yMin && 0 <= yMax;
+  const yZero = y(0);
+
+  const palette = ["#2563eb", "#16a34a", "#dc2626", "#7c3aed"];
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Puntenverloop per speler"
+        preserveAspectRatio="xMidYMid meet"
+        style={{
+          width: "100%",
+          height: "auto",
+          display: "block",
+        }}
+      >
+        {/* Y grid + labels */}
+        {yTicks.map((tv, i) => {
+          const yy = y(tv);
+          return (
+            <g key={i}>
+              <line x1={pad.l} y1={yy} x2={width - pad.r} y2={yy} stroke="#eee" />
+              <text x={pad.l - 10} y={yy + 4} fontSize="11" textAnchor="end" fill="#666">
+                {Math.round(tv)}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* 0-lijn */}
+        {zeroInRange && (
+          <g>
+            <line
+              x1={pad.l}
+              y1={yZero}
+              x2={width - pad.r}
+              y2={yZero}
+              stroke="#999"
+              strokeWidth={1.5}
+              strokeDasharray="6 6"
+            />
+            <text x={width - pad.r} y={yZero - 6} fontSize="11" textAnchor="end" fill="#666">
+              0
+            </text>
+          </g>
+        )}
+
+        {/* X axis line */}
+        <line x1={pad.l} y1={height - pad.b} x2={width - pad.r} y2={height - pad.b} stroke="#ddd" />
+
+        {/* Series lines */}
+        {series.map((s, si) => {
+          const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+          return (
+            <g key={s.name}>
+              <polyline fill="none" stroke={palette[si % palette.length]} strokeWidth={2.5} points={pts} />
+              {s.values.map((v, i) => (
+                <circle key={i} cx={x(i)} cy={y(v)} r={3.2} fill={palette[si % palette.length]} />
+              ))}
+            </g>
+          );
+        })}
+
+        {/* X labels (sparse if many) */}
+        {labels.map((lab, i) => {
+          const show = n <= 10 || i === 0 || i === n - 1 || i % 2 === 0;
+          if (!show) return null;
+          return (
+            <text key={lab + i} x={x(i)} y={height - pad.b + 22} fontSize="11" textAnchor="middle" fill="#666">
+              {lab}
+            </text>
+          );
+        })}
+      </svg>
+
+      {/* legend */}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8, fontSize: 12 }}>
+        {series.map((s, i) => (
+          <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{
+                width: 14,
+                height: 3,
+                background: palette[i % palette.length],
+                display: "inline-block",
+                borderRadius: 999,
+              }}
+            />
+            <span>{s.name}</span>
+          </div>
+        ))}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              width: 14,
+              height: 3,
+              display: "inline-block",
+              borderRadius: 999,
+              borderTop: "2px dashed #999",
+            }}
+          />
+          <span>nul-lijn</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 /* ================= PAGE ================= */
 
 export default function SessionPage() {
@@ -182,13 +315,10 @@ export default function SessionPage() {
   const [preview, setPreview] = useState<Record<string, number>>({});
   const [inputError, setInputError] = useState<string | null>(null);
 
-  // ✅ Notes (los van rondes)
+  // ✅ NOTE: single per session
+  const [noteId, setNoteId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
-  const [notes, setNotes] = useState<Note[]>([]);
   const [noteStatus, setNoteStatus] = useState<string>("");
-
-  // ✅ Note edit state (voor “Aanpassen”)
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
 
   async function getGroupId() {
     const code = localStorage.getItem("kw_join_code");
@@ -223,7 +353,7 @@ export default function SessionPage() {
 
       setPlayers(pl ?? []);
       await loadRounds(pl ?? []);
-      await loadNotes();
+      await loadNote();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
@@ -282,18 +412,31 @@ export default function SessionPage() {
     setRounds(out);
   }
 
-  async function loadNotes() {
+  /* ================= NOTE (single per session) ================= */
+
+  async function loadNote() {
     const { data, error } = await supabase
       .from("session_notes")
-      .select("id,body,created_at")
+      .select("id,body")
       .eq("session_id", sessionId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-      setNoteStatus("Fout bij laden notes: " + error.message);
+      setNoteStatus("Fout bij laden notitie: " + error.message);
       return;
     }
-    setNotes((data ?? []) as Note[]);
+
+    if (!data) {
+      setNoteId(null);
+      setNoteText("");
+      setNoteStatus("");
+      return;
+    }
+
+    setNoteId(data.id);
+    setNoteText(data.body ?? "");
     setNoteStatus("");
   }
 
@@ -302,69 +445,54 @@ export default function SessionPage() {
     if (!body) return;
 
     setNoteStatus("Opslaan...");
-    const { error } = await supabase.from("session_notes").insert({
-      session_id: sessionId,
-      body,
-    });
+
+    // ✅ als note bestaat -> update i.p.v. nieuwe rij
+    if (noteId) {
+      const { error } = await supabase.from("session_notes").update({ body }).eq("id", noteId);
+      if (error) {
+        setNoteStatus("Fout bij opslaan: " + error.message);
+        return;
+      }
+      setNoteStatus("Opgeslagen.");
+      return;
+    }
+
+    // ✅ anders: eerste keer insert
+    const { data, error } = await supabase
+      .from("session_notes")
+      .insert({ session_id: sessionId, body })
+      .select("id")
+      .single();
 
     if (error) {
       setNoteStatus("Fout bij opslaan: " + error.message);
       return;
     }
 
-    setNoteText("");
-    setEditingNoteId(null);
-    setNoteStatus("");
-    await loadNotes();
+    setNoteId(data.id);
+    setNoteStatus("Opgeslagen.");
   }
 
-  // ✅ Update bestaande note
-    async function updateNote() {
-  if (!editingNoteId) return;
-  
-  const body = noteText.trim();
-  if (!body) return;
-
-  setNoteStatus("Aanpassen...");
-
-  const { error } = await supabase
-    .from("session_notes")
-    .update({ body })
-    .eq("id", editingNoteId)
-    .eq("session_id", sessionId);
-    
-  if (error) {
-    setNoteStatus("Fout bij aanpassen: " + error.message);
-    return;
-  }
-
-  // reset editor
-  setEditingNoteId(null);
-  setNoteText("");
-  setNoteStatus("");
-
-  await loadNotes();
-}
-
-  async function deleteNote(id: string) {
-    const ok = confirm("Deze note verwijderen?");
-    if (!ok) return;
-
-    const { error } = await supabase.from("session_notes").delete().eq("id", id);
-    if (error) {
-      alert("Fout bij verwijderen: " + error.message);
+  async function deleteNote() {
+    if (!noteId) {
+      setNoteText("");
       return;
     }
 
-    if (editingNoteId === id) {
-      setEditingNoteId(null);
-      setNoteText("");
+    const ok = confirm("Notitie verwijderen?");
+    if (!ok) return;
+
+    const { error } = await supabase.from("session_notes").delete().eq("id", noteId);
+    if (error) {
+      setNoteStatus("Fout bij verwijderen: " + error.message);
+      return;
     }
 
-    await loadNotes();
+    setNoteId(null);
+    setNoteText("");
+    setNoteStatus("Verwijderd.");
   }
 
-  // ✅ ronde deleten (rondes + scores)
   async function deleteRound(roundId: string) {
     const ok = confirm("Deze ronde verwijderen? (scores worden ook verwijderd)");
     if (!ok) return;
@@ -453,44 +581,28 @@ export default function SessionPage() {
   const GAP_AFTER_LAST_PLAYER = 80;
   const CHOICE_COL_WIDTH = 190;
 
-  /* ================= CHART (cumulative totals per round) ================= */
+  /* ================= CHART DATA (same shape as overzicht) ================= */
 
-  const chart = useMemo(() => {
-    const labels = rounds.map((r) => r.no);
-    const playerNames = players.map((p) => p.name);
-
-    const series: Record<string, number[]> = {};
-    for (const name of playerNames) series[name] = [];
+  const chartData = useMemo(() => {
+    const labels = rounds.map((r) => String(r.no));
 
     const running: Record<string, number> = {};
-    for (const name of playerNames) running[name] = 0;
+    for (const p of players) running[p.name] = 0;
+
+    const series = players.map((p) => ({ name: p.name, values: [] as number[] }));
 
     for (const r of rounds) {
-      for (const name of playerNames) {
-        const val = r.items.find((i) => i.name === name)?.points ?? 0;
-        running[name] += val;
-        series[name].push(running[name]);
+      for (const p of players) {
+        const v = r.items.find((i) => i.name === p.name)?.points ?? 0;
+        running[p.name] += v;
+      }
+      for (const p of players) {
+        series.find((x) => x.name === p.name)!.values.push(running[p.name]);
       }
     }
 
-    let minY = 0;
-    let maxY = 0;
-    for (const name of playerNames) {
-      for (const v of series[name] ?? []) {
-        minY = Math.min(minY, v);
-        maxY = Math.max(maxY, v);
-      }
-    }
-    if (minY === maxY) {
-      minY -= 1;
-      maxY += 1;
-    }
-
-    return { labels, playerNames, series, minY, maxY };
+    return { labels, series };
   }, [rounds, players]);
-
-  const CHART_H = 320; // ✅ dubbel zo hoog
-  const COLORS = ["#111827", "#2563eb", "#16a34a", "#dc2626"]; // 4 lijnen
 
   return (
     <div style={{ padding: 24, maxWidth: 900, fontFamily: "system-ui" }}>
@@ -779,7 +891,7 @@ export default function SessionPage() {
                       );
                     })}
 
-                    {/* ✅ Keuze + vuilbakje rechts (delete ronde) */}
+                    {/* keuze + delete ronde */}
                     <td
                       style={{
                         textAlign: "left",
@@ -845,129 +957,27 @@ export default function SessionPage() {
             </table>
           </div>
 
-          {/* ✅ GRAFIEK (zelfde aanpak: SVG + nul-lijn gestippeld) */}
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Grafiek (totaal na elke ronde)</div>
-
-            <div
-              style={{
-                overflowX: "auto",
-                WebkitOverflowScrolling: "touch",
-                border: "1px solid #eee",
-                borderRadius: 12,
-                padding: 10,
-              }}
-            >
-              {(() => {
-                const labels = chart.labels;
-                const playerNames = chart.playerNames;
-                const series = chart.series;
-
-                const w = Math.max(820, 120 + labels.length * 80); // swipe op gsm
-                const h = CHART_H;
-
-                const padL = 50;
-                const padR = 20;
-                const padT = 20;
-                const padB = 30;
-
-                const minY = chart.minY;
-                const maxY = chart.maxY;
-
-                const xCount = Math.max(1, labels.length);
-                const xStep = (w - padL - padR) / Math.max(1, xCount - 1);
-
-                const yToPx = (v: number) => {
-                  const t = (v - minY) / (maxY - minY);
-                  return padT + (1 - clamp(t, 0, 1)) * (h - padT - padB);
-                };
-                const xToPx = (i: number) => padL + i * xStep;
-
-                const zeroY = yToPx(0);
-
-                return (
-                  <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Puntenverloop">
-                    <rect x={0} y={0} width={w} height={h} fill="white" />
-
-                    {/* nul-lijn */}
-                    <line
-                      x1={padL}
-                      y1={zeroY}
-                      x2={w - padR}
-                      y2={zeroY}
-                      stroke="#999"
-                      strokeWidth={1}
-                      strokeDasharray="4 4"
-                    />
-
-                    {/* assen */}
-                    <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="#ddd" strokeWidth={1} />
-                    <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke="#ddd" strokeWidth={1} />
-
-                    {/* y labels */}
-                    <text x={10} y={yToPx(maxY) + 4} fontSize={12} fill="#555">
-                      {Math.round(maxY)}
-                    </text>
-                    <text x={10} y={zeroY + 4} fontSize={12} fill="#555">
-                      0
-                    </text>
-                    <text x={10} y={yToPx(minY) + 4} fontSize={12} fill="#555">
-                      {Math.round(minY)}
-                    </text>
-
-                    {/* x labels */}
-                    {labels.map((lab, i) => (
-                      <text key={lab} x={xToPx(i)} y={h - 10} fontSize={12} fill="#555" textAnchor="middle">
-                        {lab}
-                      </text>
-                    ))}
-
-                    {/* lines */}
-                    {playerNames.map((name, idx) => {
-                      const vals = series[name] ?? [];
-                      const xs = vals.map((_, i) => xToPx(i));
-                      const ys = vals.map((v) => yToPx(v));
-                      const d = buildLinePath(xs, ys);
-                      const color = COLORS[idx % COLORS.length];
-
-                      return (
-                        <g key={name}>
-                          <path d={d} fill="none" stroke={color} strokeWidth={3} />
-                          {vals.length ? (
-                            <circle cx={xs[xs.length - 1]} cy={ys[ys.length - 1]} r={4} fill={color} />
-                          ) : null}
-                        </g>
-                      );
-                    })}
-
-                    {/* legend */}
-                    <g>
-                      {playerNames.map((name, idx) => (
-                        <g key={name} transform={`translate(${padL + idx * 170}, ${padT})`}>
-                          <rect x={0} y={-10} width={14} height={14} fill={COLORS[idx % COLORS.length]} />
-                          <text x={20} y={2} fontSize={12} fill="#111">
-                            {name}
-                          </text>
-                        </g>
-                      ))}
-                    </g>
-                  </svg>
-                );
-              })()}
-            </div>
-          </div>
+          {/* ✅ grafiek (zelfde layout als overzicht) */}
+          {chartData.labels.length >= 2 ? (
+            <>
+              <div style={{ marginTop: 16, fontWeight: 700 }}>Puntenverloop (cumulatief)</div>
+              <LineChart series={chartData.series} labels={chartData.labels} />
+            </>
+          ) : (
+            <div style={{ marginTop: 14, fontSize: 12, color: "#666" }}>Voeg minstens 2 rondes toe om een grafiek te zien.</div>
+          )}
         </>
       )}
 
-      {/* ✅ NOTES (los van rondes) */}
+      {/* ✅ NOTITIE: 1 per sessie, 2 knoppen, geen timestamps */}
       <div style={{ marginTop: 18 }}>
-        <div style={{ fontWeight: 600, marginBottom: 6 }}>Notities</div>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Notitie</div>
 
         <textarea
           value={noteText}
           onChange={(e) => setNoteText(e.target.value)}
           rows={4}
-          placeholder="Typ hier losse notities voor deze avond..."
+          placeholder="Typ hier de notitie voor deze avond..."
           style={{
             width: "100%",
             padding: 10,
@@ -979,177 +989,38 @@ export default function SessionPage() {
         />
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-          {/* ✅ Als je een note aan het editen bent, toon Aanpassen + Annuleer */}
-          {editingNoteId ? (
-            <>
-              <button
-                onClick={updateNote}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #ccc",
-                  background: "#fafafa",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                }}
-              >
-                Aanpassen
-              </button>
+          <button
+            onClick={saveNote}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ccc",
+              background: "#fafafa",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Opslaan
+          </button>
 
-              <button
-                onClick={() => {
-                  setEditingNoteId(null);
-                  setNoteText("");
-                }}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #ccc",
-                  background: "white",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                }}
-              >
-                Annuleer
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={saveNote}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid #ccc",
-                background: "#fafafa",
-                fontWeight: 800,
-                cursor: "pointer",
-              }}
-            >
-              Notitie opslaan
-            </button>
-          )}
+          <button
+            onClick={deleteNote}
+            disabled={!noteId && !noteText.trim()}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ccc",
+              background: !noteId && !noteText.trim() ? "#eee" : "white",
+              fontWeight: 800,
+              cursor: !noteId && !noteText.trim() ? "not-allowed" : "pointer",
+            }}
+          >
+            Verwijderen
+          </button>
 
           {noteStatus ? <span style={{ color: "#666" }}>{noteStatus}</span> : null}
-        </div>
-
-        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-          {notes.length === 0 ? (
-            <p style={{ marginTop: 8 }}>Nog geen notities.</p>
-          ) : (
-            notes.map((n) => (
-              <div
-                key={n.id}
-                style={{
-                  border: "1px solid #eee",
-                  borderRadius: 12,
-                  padding: 10,
-                  background: "#fafafa",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 700 }}>{new Date(n.created_at).toLocaleString()}</div>
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {/* ✅ Aanpassen naast Verwijder */}
-                    <button
-                      onClick={() => {
-                        setEditingNoteId(n.id);
-                        setNoteText(n.body);
-                        window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-                      }}
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 10,
-                        border: "1px solid #ccc",
-                        background: "white",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Aanpassen
-                    </button>
-
-                    <button
-                      onClick={() => deleteNote(n.id)}
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 10,
-                        border: "1px solid #ccc",
-                        background: "white",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Verwijder
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{n.body}</div>
-              </div>
-            ))
-          )}
         </div>
       </div>
     </div>
   );
-
-  // chart memo uses rounds + players, defined below return to keep JSX unchanged
-  function useChartMemo() {
-    return null;
-  }
-}
-
-/* ====== memo moved after component is defined (but used inside via closure) ======
-   We keep it here to avoid changing your layout flow too much.
-*/
-function useChartData(rounds: { no: number; items: { name: string; points: number }[] }[], players: Player[]) {
-  return { labels: [], playerNames: [], series: {}, minY: 0, maxY: 0 } as any;
-}
-
-// ✅ Inline chart memo (keeps file self-contained without changing your UI structure)
-const __noop = null as any;
-
-function SessionPageChartMemo(rounds: any[], players: any[]) {
-  return __noop;
-}
-
-/* ================= CHART MEMO (simple & local) ================= */
-function chartMemoFactory(rounds: any[], players: any[]) {
-  const labels = rounds.map((r) => r.no);
-  const playerNames = players.map((p) => p.name);
-
-  const series: Record<string, number[]> = {};
-  for (const name of playerNames) series[name] = [];
-
-  const running: Record<string, number> = {};
-  for (const name of playerNames) running[name] = 0;
-
-  for (const r of rounds) {
-    for (const name of playerNames) {
-      const val = r.items.find((i: any) => i.name === name)?.points ?? 0;
-      running[name] += val;
-      series[name].push(running[name]);
-    }
-  }
-
-  let minY = 0;
-  let maxY = 0;
-  for (const name of playerNames) {
-    for (const v of series[name] ?? []) {
-      minY = Math.min(minY, v);
-      maxY = Math.max(maxY, v);
-    }
-  }
-  if (minY === maxY) {
-    minY -= 1;
-    maxY += 1;
-  }
-
-  return { labels, playerNames, series, minY, maxY };
-}
-
-// Hack-free memo for the chart: we re-export a hook-like helper
-function useChartMemo(rounds: any[], players: any[]) {
-  return useMemo(() => chartMemoFactory(rounds, players), [rounds, players]);
 }

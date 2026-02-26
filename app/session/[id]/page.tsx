@@ -26,8 +26,10 @@ type Note = { id: string; body: string };
 
 function winnerRange(choice: Choice) {
   if (choice === "DUBBEL" || choice === "TROEL") return { min: 2, max: 2 };
-  if (choice === "KLEINE_MISERE") return { min: 1, max: 3 };
-  if (choice === "GROTE_MISERE") return { min: 1, max: 3 };
+
+  // ✅ Misères: altijd 1 winnaar (24/12 gaat naar die speler)
+  if (choice === "KLEINE_MISERE" || choice === "GROTE_MISERE") return { min: 1, max: 1 };
+
   return { min: 1, max: 1 };
 }
 
@@ -58,7 +60,9 @@ function labelChoice(c: string) {
  *    => winnaar = (o>=0 ? 6+3o : -(6+3abs(o)))
  *    => verliezers elk = -winnaar/3 (moet integer blijven)
  *
- * Misères: totaal +12/-12 of +24/-24 verdeeld over winnaars/verliezers.
+ * ✅ Voor KLEINE/GROTE MISERE + ABONDANCE + SOLO SLIM:
+ *    overslagen > 0 => geen effect
+ *    overslagen < 0 => alle punten * -1 (ongeacht hoeveel negatief)
  */
 function computePoints(
   players: { id: string }[],
@@ -75,26 +79,28 @@ function computePoints(
   }
 
   const isWinner = (pid: string) => winnerIds.includes(pid);
-  const losers = 4 - winnerIds.length;
-  if (losers <= 0) throw new Error("Minstens 1 verliezer nodig.");
 
   const o = Number.isFinite(overslagen) ? overslagen : 0;
   const multiplier = Math.max(1, mult || 1);
 
+  // ✅ flip enkel voor deze 4 keuzes wanneer overslagen < 0
+  const flipChoices: Choice[] = ["ABONDANCE", "SOLO_SLIM", "KLEINE_MISERE", "GROTE_MISERE"];
+  const shouldFlip = flipChoices.includes(choice) && o < 0;
+
   const out: Record<string, number> = {};
 
-  // Misère (verdeling)
+  // ✅ Misère (altijd 1 winnaar): winnaar krijgt 12/24, anderen -4/-8, en bij negatief: alles * -1
   if (choice === "KLEINE_MISERE" || choice === "GROTE_MISERE") {
     const total = choice === "KLEINE_MISERE" ? 12 : 24;
 
-    const winPts = total / winnerIds.length;
-    const losePts = -total / losers;
-
-    if (!Number.isInteger(winPts) || !Number.isInteger(losePts)) {
-      throw new Error("Misère verdeling niet geldig (kies andere winnaars).");
-    }
+    const winPts = total;        // ✅ altijd 12/24
+    const losePts = -total / 3;  // ✅ -4 / -8
 
     for (const p of players) out[p.id] = isWinner(p.id) ? winPts : losePts;
+
+    if (shouldFlip) {
+      for (const k of Object.keys(out)) out[k] *= -1;
+    }
   } else {
     if (choice === "DUBBEL") {
       const win = o >= 0 ? 2 + o : -(2 + Math.abs(o));
@@ -129,6 +135,12 @@ function computePoints(
           baseWin = 0;
           baseLose = 0;
           break;
+      }
+
+      // ✅ overslagen < 0 => omkeren (ongeacht hoeveel negatief)
+      if (shouldFlip) {
+        baseWin *= -1;
+        baseLose *= -1;
       }
 
       for (const p of players) out[p.id] = isWinner(p.id) ? baseWin : baseLose;
@@ -534,7 +546,8 @@ export default function SessionPage() {
           session_id: sessionId,
           round_no: roundNo,
           choice,
-          overslagen: choice === "ENKEL" || choice === "DUBBEL" || choice === "TROEL" ? overslagen : 0,
+          // ✅ overslagen altijd opslaan (ook voor misère/abondance/solo)
+          overslagen,
           mult,
         })
         .select("id")
@@ -657,8 +670,14 @@ export default function SessionPage() {
           </select>
         </div>
 
-        {/* Overslagen (negatief toegestaan) */}
-        {(choice === "ENKEL" || choice === "DUBBEL" || choice === "TROEL") && (
+        {/* ✅ Overslagen (negatief toegestaan) — ook voor misère/abondance/solo */}
+        {(choice === "ENKEL" ||
+          choice === "DUBBEL" ||
+          choice === "TROEL" ||
+          choice === "ABONDANCE" ||
+          choice === "KLEINE_MISERE" ||
+          choice === "GROTE_MISERE" ||
+          choice === "SOLO_SLIM") && (
           <div>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Overslagen</div>
 
@@ -714,6 +733,15 @@ export default function SessionPage() {
                 +
               </button>
             </div>
+
+            {(choice === "ABONDANCE" ||
+              choice === "SOLO_SLIM" ||
+              choice === "KLEINE_MISERE" ||
+              choice === "GROTE_MISERE") && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>
+                Tip: <b>negatief</b> = omkeren (punten * -1). Positief heeft geen effect.
+              </div>
+            )}
           </div>
         )}
 
@@ -964,7 +992,9 @@ export default function SessionPage() {
               <LineChart series={chartData.series} labels={chartData.labels} />
             </>
           ) : (
-            <div style={{ marginTop: 14, fontSize: 12, color: "#666" }}>Voeg minstens 2 rondes toe om een grafiek te zien.</div>
+            <div style={{ marginTop: 14, fontSize: 12, color: "#666" }}>
+              Voeg minstens 2 rondes toe om een grafiek te zien.
+            </div>
           )}
         </>
       )}
